@@ -18,11 +18,11 @@
 #define MICROPY_HW_ENABLE_CAN       (0)
 
 // use external SPI flash for storage TODO: Is quad flash How to define it?
-#define MICROPY_HW_SPIFLASH_SIZE_BITS (64 * 1024 * 1024)
-#define MICROPY_HW_SPIFLASH_CS      (pin_E11)
-#define MICROPY_HW_SPIFLASH_SCK     (pin_E10)
-#define MICROPY_HW_SPIFLASH_MOSI    (pin_E12)
-#define MICROPY_HW_SPIFLASH_MISO    (pin_E13)
+//#define MICROPY_HW_SPIFLASH_SIZE_BITS (64 * 1024 * 1024)
+//#define MICROPY_HW_SPIFLASH_CS      (pin_E11)
+//#define MICROPY_HW_SPIFLASH_SCK     (pin_E10)
+//#define MICROPY_HW_SPIFLASH_MOSI    (pin_E12)
+//#define MICROPY_HW_SPIFLASH_MISO    (pin_E13)
 
 // MSI is used and is 4MHz
 #define MICROPY_HW_CLK_PLLM (1)
