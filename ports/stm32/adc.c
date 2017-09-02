@@ -44,7 +44,7 @@
 ///     adc = pyb.ADC(pin)              # create an analog object from a pin
 ///     val = adc.read()                # read an analog value
 ///
-///     adc = pyb.ADCAll(resolution)    # creale an ADCAll object
+///     adc = pyb.ADCAll(resolution)    # create an ADCAll object
 ///     val = adc.read_channel(channel) # read the given channel
 ///     val = adc.read_core_temp()      # read MCU temperature
 ///     val = adc.read_core_vbat()      # read MCU VBAT
@@ -95,7 +95,7 @@
       defined(STM32F746xx) || defined(STM32F767xx) || \
       defined(STM32F769xx) || defined(STM32F446xx)
 #define VBAT_DIV (4)
-#elif defined(STM32L476xx)
+#elif defined(STM32L476xx) || defined(STM32L475xx)
 #define VBAT_DIV (3)
 #else
 #error Unsupported processor
