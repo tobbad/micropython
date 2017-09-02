@@ -73,7 +73,7 @@
 #define MICROPY_HW_USRSW_PRESSED    (1)
 
 // LEDs
-#define MICROPY_HW_LED1             (pin_A5) // red
+#define MICROPY_HW_LED1             (pin_A5) // green
 #define MICROPY_HW_LED2             (pin_B14) // green
 #define MICROPY_HW_LED_ON(pin)      (mp_hal_pin_high(pin))
 #define MICROPY_HW_LED_OFF(pin)     (mp_hal_pin_low(pin))
