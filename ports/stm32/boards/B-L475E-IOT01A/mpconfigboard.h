@@ -36,7 +36,9 @@
 // USART1 config connected to ST-Link
 #define MICROPY_HW_UART1_TX     (pin_B6)
 #define MICROPY_HW_UART1_RX     (pin_B7)
-// USART2 config connected to PMOD
+// USART2 config connected to PMOD: Flow control is defined and therfore used
+#define MICROPY_HW_UART2_CTS    (pin_D3)
+#define MICROPY_HW_UART2_RTS    (pin_D4)
 #define MICROPY_HW_UART2_TX     (pin_D5)
 #define MICROPY_HW_UART2_RX     (pin_D6)
 // USART3 config for internal use
@@ -56,12 +58,17 @@
 #define MICROPY_HW_I2C2_SDA (pin_B11)
 
 // SPI busses
-// #define MICROPY_HW_SPI1_NSS     (pin_A4) 
+#define MICROPY_HW_SPI1_NSS     (pin_A4)
 #define MICROPY_HW_SPI1_SCK     (pin_A5)
 #define MICROPY_HW_SPI1_MISO    (pin_A6)
 #define MICROPY_HW_SPI1_MOSI    (pin_A7)
 
-//#define MICROPY_HW_SPI3_NSS     (pin_A15)
+#define MICROPY_HW_SPI2_NSS     (pin_D0)
+#define MICROPY_HW_SPI2_SCK     (pin_D1)
+#define MICROPY_HW_SPI2_MISO    (pin_D3)
+#define MICROPY_HW_SPI2_MOSI    (pin_D4)
+
+#define MICROPY_HW_SPI3_NSS     (pin_A15)
 #define MICROPY_HW_SPI3_SCK     (pin_C10)
 #define MICROPY_HW_SPI3_MISO    (pin_C11)
 #define MICROPY_HW_SPI3_MOSI    (pin_C12)
@@ -78,5 +85,3 @@
 #define MICROPY_HW_LED_ON(pin)      (mp_hal_pin_high(pin))
 #define MICROPY_HW_LED_OFF(pin)     (mp_hal_pin_low(pin))
 
-// USB config
-// #define MICROPY_HW_USB_OTG_ID_PIN      (pin_C12) // This is not the official ID Pin which should be PA10
