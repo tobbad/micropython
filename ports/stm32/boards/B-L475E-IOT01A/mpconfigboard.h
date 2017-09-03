@@ -66,11 +66,11 @@
 #define MICROPY_HW_SPI3_MISO    (pin_C11)
 #define MICROPY_HW_SPI3_MOSI    (pin_C12)
 
-// Joystick is pulled low. Pressing the button makes the input go high.
+// User and wakeup switch. Pressing the button makes the input go low.
 #define MICROPY_HW_USRSW_PIN        (pin_C13)
 #define MICROPY_HW_USRSW_PULL       (GPIO_NOPULL)
-#define MICROPY_HW_USRSW_EXTI_MODE  (GPIO_MODE_IT_RISING)
-#define MICROPY_HW_USRSW_PRESSED    (1)
+#define MICROPY_HW_USRSW_EXTI_MODE  (GPIO_MODE_IT_FALLING)
+#define MICROPY_HW_USRSW_PRESSED    (0)
 
 // LEDs
 #define MICROPY_HW_LED1             (pin_A5) // green
