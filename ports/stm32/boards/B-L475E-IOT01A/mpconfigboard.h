@@ -1,11 +1,8 @@
-// #define MICROPY_BOARD_EARLY_INIT    STM32L476DISC_board_early_init
-// void STM32L476DISC_board_early_init(void);
-
 #define MICROPY_HW_BOARD_NAME       "B-L475E-IOT01A"
 #define MICROPY_HW_MCU_NAME         "STM32L475"
 
 #define MICROPY_HW_HAS_SWITCH       (1)
-#define MICROPY_HW_HAS_FLASH        (0) // ADD when QUAD SPI is done
+#define MICROPY_HW_HAS_FLASH        (0)
 #define MICROPY_HW_HAS_SDCARD       (0)
 #define MICROPY_HW_HAS_MMA7660      (0)
 #define MICROPY_HW_HAS_LIS3DSH      (0)
@@ -16,13 +13,6 @@
 #define MICROPY_HW_ENABLE_SERVO     (0)
 #define MICROPY_HW_ENABLE_DAC       (0)
 #define MICROPY_HW_ENABLE_CAN       (0)
-
-// use external SPI flash for storage TODO: Is quad flash How to define it?
-//#define MICROPY_HW_SPIFLASH_SIZE_BITS (64 * 1024 * 1024)
-//#define MICROPY_HW_SPIFLASH_CS      (pin_E11)
-//#define MICROPY_HW_SPIFLASH_SCK     (pin_E10)
-//#define MICROPY_HW_SPIFLASH_MOSI    (pin_E12)
-//#define MICROPY_HW_SPIFLASH_MISO    (pin_E13)
 
 // MSI is used and is 4MHz
 #define MICROPY_HW_CLK_PLLM (1)
@@ -73,7 +63,7 @@
 #define MICROPY_HW_SPI3_MISO    (pin_C11)
 #define MICROPY_HW_SPI3_MOSI    (pin_C12)
 
-// User and wakeup switch. Pressing the button makes the input go low.
+// User and wake-up switch. Pressing the button makes the input go low.
 #define MICROPY_HW_USRSW_PIN        (pin_C13)
 #define MICROPY_HW_USRSW_PULL       (GPIO_NOPULL)
 #define MICROPY_HW_USRSW_EXTI_MODE  (GPIO_MODE_IT_FALLING)
