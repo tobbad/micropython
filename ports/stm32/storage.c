@@ -92,7 +92,7 @@ STATIC byte flash_cache_mem[0x4000] __attribute__((aligned(4))); // 16k
 #define FLASH_MEM_SEG1_START_ADDR (0x08008000) // sector 1
 #define FLASH_MEM_SEG1_NUM_BLOCKS (192) // sectors 1,2,3: 32k+32k+32=96k
 
-#elif defined(STM32L475xx) || defined(STM32L476xx)
+#elif defined(STM32L475xx) || defined(STM32L476xx) || defined(STM32L496xx)
 
 extern uint8_t _flash_fs_start;
 extern uint8_t _flash_fs_end;
