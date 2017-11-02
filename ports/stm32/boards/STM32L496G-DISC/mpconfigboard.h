@@ -57,5 +57,5 @@
 
 // LEDs
 #define MICROPY_HW_LED1             (pin_B13) // Green
-#define MICROPY_HW_LED_ON(pin)      (mp_hal_pin_high(pin))
-#define MICROPY_HW_LED_OFF(pin)     (mp_hal_pin_low(pin))
+#define MICROPY_HW_LED_ON(pin)      (mp_hal_pin_low(pin))
+#define MICROPY_HW_LED_OFF(pin)     (mp_hal_pin_high(pin))
