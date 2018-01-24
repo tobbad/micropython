@@ -76,6 +76,11 @@
 #define CHAR_WIDTH_8BIT (0)
 #define CHAR_WIDTH_9BIT (1)
 
+#define CB_REASON_NONE (0x00)
+#define CB_REASON_RX_CHAR (1<<0)
+#define CB_REASON_RX_IDLE (1<<1)
+#define CB_REASON_TX_FINISHED (1<<2)
+
 struct _pyb_uart_obj_t {
     mp_obj_base_t base;
     UART_HandleTypeDef uart;            // this is 17 words big
@@ -83,6 +88,8 @@ struct _pyb_uart_obj_t {
     pyb_uart_t uart_id : 8;
     bool is_enabled : 1;
     byte char_width;                    // 0 for 7,8 bit chars, 1 for 9 bit chars
+    uint8_t  callback_en;				// Enable
+    uint8_t  cb_reason; 			    // Reason for executing the callback
     uint16_t char_mask;                 // 0x7f for 7 bit, 0xff for 8 bit, 0x1ff for 9 bit
     uint16_t timeout;                   // timeout waiting for first char
     uint16_t timeout_char;              // timeout waiting between chars
@@ -93,6 +100,7 @@ struct _pyb_uart_obj_t {
     byte *read_buf;                     // byte or uint16_t, depending on char size
     const dma_descr_t *tx_dma_descr;
     const dma_descr_t *rx_dma_descr;
+    // Debug only
     uint32_t tx_tick_start;
 };
 
@@ -555,6 +563,8 @@ void uart_irq_handler(mp_uint_t uart_id) {
         return;
     }
 
+    self->cb_reason = CB_REASON_NONE;
+
     if (__HAL_UART_GET_FLAG(&self->uart, UART_FLAG_RXNE) != RESET) {
         if (self->read_buf_len != 0) {
             uint16_t next_head = (self->read_buf_head + 1) % self->read_buf_len;
@@ -576,29 +586,12 @@ void uart_irq_handler(mp_uint_t uart_id) {
                 __HAL_UART_DISABLE_IT(&self->uart, UART_IT_RXNE);
             }
         }
+        self->cb_reason |= CB_REASON_RX_CHAR;
     }
 
     if (__HAL_UART_GET_FLAG(&self->uart, UART_FLAG_IDLE) != RESET) {
         __HAL_UART_CLEAR_IDLEFLAG(&self->uart);
-        // execute callback if it's set
-        if (self->callback != mp_const_none) {
-            mp_sched_lock();
-            // When executing code within a handler we must lock the GC to prevent
-            // any memory allocations.  We must also catch any exceptions.
-            gc_lock();
-            nlr_buf_t nlr;
-            if (nlr_push(&nlr) == 0) {
-                mp_call_function_1(self->callback, self);
-                nlr_pop();
-            } else {
-                // Uncaught exception; disable the callback so it doesn't run again.
-                self->callback = mp_const_none;
-                printf("uncaught exception in UART interrupt handler\n");
-                mp_obj_print_exception(&mp_plat_print, (mp_obj_t)nlr.ret_val);
-            }
-            gc_unlock();
-            mp_sched_unlock();
-        }
+        self->cb_reason |= CB_REASON_RX_IDLE;
     }
     if (__HAL_UART_GET_FLAG(&self->uart, UART_FLAG_TC) != RESET)
     {
@@ -608,7 +601,27 @@ void uart_irq_handler(mp_uint_t uart_id) {
 			printf("TX IRQ time %d us\r\n", (int)(tx_tick_stop-self->tx_tick_start));
 			dma_deinit(self->tx_dma_descr);
 			tx_dma.Instance = NULL;
+			self->cb_reason |= CB_REASON_TX_FINISHED;
     	}
+    }
+    self->cb_reason &= self->callback_en;
+    if ( (self->cb_reason != CB_REASON_NONE) && (self->callback != mp_const_none)) {
+		mp_sched_lock();
+		// When executing code within a handler we must lock the GC to prevent
+		// any memory allocations.  We must also catch any exceptions.
+		gc_lock();
+		nlr_buf_t nlr;
+		if (nlr_push(&nlr) == 0) {
+			mp_call_function_1(self->callback, self);
+			nlr_pop();
+		} else {
+			// Uncaught exception; disable the callback so it doesn't run again.
+			self->callback = mp_const_none;
+			printf("uncaught exception in UART interrupt handler\n");
+			mp_obj_print_exception(&mp_plat_print, (mp_obj_t)nlr.ret_val);
+		}
+		gc_unlock();
+		mp_sched_unlock();
     }
 }
 
@@ -884,6 +897,8 @@ STATIC mp_obj_t pyb_uart_make_new(const mp_obj_type_t *type, size_t n_args, size
         self->base.type = &pyb_uart_type;
         self->uart_id = uart_id;
         self->callback = mp_const_none;
+        self->callback_en = CB_REASON_NONE;
+        self->cb_reason = CB_REASON_NONE;
         MP_STATE_PORT(pyb_uart_obj_all)[uart_id - 1] = self;
     } else {
         // reference existing UART object
@@ -1045,6 +1060,35 @@ STATIC mp_obj_t pyb_uart_callback(mp_obj_t self_in, mp_obj_t callback) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(pyb_uart_callback_obj, pyb_uart_callback);
 
+/// \method callback_en([bitmask])
+/// Get or set the enabled callbacks bitmask:
+///
+///   - With no argument, return or-ed bitmask of IRQ_?? values.
+///   - With `bitmask` given, allow the related IRQ callbacks.
+STATIC mp_obj_t pyb_uart_callback_en(size_t n_args, const mp_obj_t *args) {
+    mp_arg_check_num(n_args, 0, 1, 2, false);
+	pyb_uart_obj_t *self = args[0];
+    if (n_args == 1) {
+        // get IRQ callback mask
+        return MP_OBJ_NEW_SMALL_INT(self->callback_en);
+    } else {
+        // set IRQ callback mask
+    	self->callback_en =  mp_obj_get_int(args[1]);
+        return mp_const_none;
+    }
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(pyb_uart_callback_en_obj, 1, 2, pyb_uart_callback_en);
+
+/// \method cb_reason()
+/// Return the reason for executing the callback as or-ed IRQ_?? values
+///
+STATIC mp_obj_t pyb_uart_cb_reason(mp_obj_t self_in) {
+	pyb_uart_obj_t *self = self_in;
+    return MP_OBJ_NEW_SMALL_INT(self->cb_reason);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(pyb_uart_cb_reason_obj, pyb_uart_cb_reason);
+
+
 STATIC const mp_rom_map_elem_t pyb_uart_locals_dict_table[] = {
     // instance methods
 
@@ -1067,10 +1111,16 @@ STATIC const mp_rom_map_elem_t pyb_uart_locals_dict_table[] = {
 
     // \method callback(fun)
     { MP_ROM_QSTR(MP_QSTR_callback), MP_ROM_PTR(&pyb_uart_callback_obj) },
+    { MP_ROM_QSTR(MP_QSTR_callback_en), MP_ROM_PTR(&pyb_uart_callback_en_obj) },
+    { MP_ROM_QSTR(MP_QSTR_cb_reason), MP_ROM_PTR(&pyb_uart_cb_reason_obj) },
 
     // class constants
     { MP_ROM_QSTR(MP_QSTR_RTS), MP_ROM_INT(UART_HWCONTROL_RTS) },
     { MP_ROM_QSTR(MP_QSTR_CTS), MP_ROM_INT(UART_HWCONTROL_CTS) },
+    { MP_ROM_QSTR(MP_QSTR_NO_CB), MP_ROM_INT(CB_REASON_NONE) },
+    { MP_ROM_QSTR(MP_QSTR_RX_CHAR_CB), MP_ROM_INT(CB_REASON_RX_CHAR) },
+    { MP_ROM_QSTR(MP_QSTR_RX_IDLE_CB), MP_ROM_INT(CB_REASON_RX_IDLE) },
+    { MP_ROM_QSTR(MP_QSTR_TX_CPLT_CB), MP_ROM_INT(CB_REASON_TX_FINISHED) },
 };
 
 STATIC MP_DEFINE_CONST_DICT(pyb_uart_locals_dict, pyb_uart_locals_dict_table);
