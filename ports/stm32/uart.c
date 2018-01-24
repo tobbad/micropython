@@ -29,12 +29,14 @@
 #include <stdarg.h>
 
 #include "py/runtime.h"
+#include "py/gc.h"
 #include "py/stream.h"
 #include "py/mperrno.h"
 #include "py/mphal.h"
 #include "uart.h"
 #include "irq.h"
 #include "genhdr/pins.h"
+#include "dma.h"
 
 /// \moduleref pyb
 /// \class UART - duplex serial communication bus
@@ -87,8 +89,15 @@ struct _pyb_uart_obj_t {
     uint16_t read_buf_len;              // len in chars; buf can hold len-1 chars
     volatile uint16_t read_buf_head;    // indexes first empty slot
     uint16_t read_buf_tail;             // indexes first full slot (not full if equals head)
+    mp_obj_t callback;
     byte *read_buf;                     // byte or uint16_t, depending on char size
+    const dma_descr_t *tx_dma_descr;
+    const dma_descr_t *rx_dma_descr;
+    uint32_t tx_tick_start;
 };
+
+static DMA_HandleTypeDef tx_dma;
+
 
 STATIC mp_obj_t pyb_uart_deinit(mp_obj_t self_in);
 
@@ -155,6 +164,9 @@ STATIC bool uart_init2(pyb_uart_obj_t *uart_obj) {
     USART_TypeDef *UARTx;
     IRQn_Type irqn;
     int uart_unit;
+    const dma_descr_t *tx_dma_descr = NULL;
+    const dma_descr_t *rx_dma_descr = NULL;
+
 
     const pin_obj_t *pins[4] = {0};
 
@@ -166,6 +178,8 @@ STATIC bool uart_init2(pyb_uart_obj_t *uart_obj) {
             irqn = USART1_IRQn;
             pins[0] = &MICROPY_HW_UART1_TX;
             pins[1] = &MICROPY_HW_UART1_RX;
+            tx_dma_descr    = &dma_UART_1_TX;
+            rx_dma_descr    = &dma_UART_1_RX;
             __USART1_CLK_ENABLE();
             break;
         #endif
@@ -177,6 +191,8 @@ STATIC bool uart_init2(pyb_uart_obj_t *uart_obj) {
             irqn = USART2_IRQn;
             pins[0] = &MICROPY_HW_UART2_TX;
             pins[1] = &MICROPY_HW_UART2_RX;
+            tx_dma_descr    = &dma_UART_2_TX;
+            rx_dma_descr    = &dma_UART_2_RX;
             #if defined(MICROPY_HW_UART2_RTS)
             if (uart_obj->uart.Init.HwFlowCtl & UART_HWCONTROL_RTS) {
                 pins[2] = &MICROPY_HW_UART2_RTS;
@@ -293,10 +309,16 @@ STATIC bool uart_init2(pyb_uart_obj_t *uart_obj) {
             }
         }
     }
-
+    uart_obj->tx_dma_descr = tx_dma_descr;
+    uart_obj->rx_dma_descr = rx_dma_descr;
     uart_obj->irqn = irqn;
     uart_obj->uart.Instance = UARTx;
-
+    #if defined(MCU_SERIES_L4)
+    // disable override bit, otherwise read interrupt can sometimes crash (OSR
+    // set and read bit not set -> irq's get constantly fired..
+    UARTx->CR3 |= USART_CR3_OVRDIS;
+    #endif
+    
     // init UARTx
     HAL_UART_Init(&uart_obj->uart);
 
@@ -404,6 +426,21 @@ STATIC bool uart_wait_flag_set(pyb_uart_obj_t *self, uint32_t flag, uint32_t tim
     }
 }
 
+
+STATIC HAL_StatusTypeDef uart_wait_for_state(pyb_uart_obj_t *self, HAL_UART_StateTypeDef state, uint32_t timeout) {
+    // Note: we can't use WFI to idle in this loop because the DMA completion
+    // interrupt may occur before the WFI.  Hence we miss it and have to wait
+    // until the next sys-tick (up to 1ms).
+    uint32_t start = HAL_GetTick();
+    while ( HAL_UART_GetState(&self->uart) != state) {
+        if (HAL_GetTick() - start >= timeout) {
+            return HAL_TIMEOUT;
+        }
+        __WFI();
+    }
+    return HAL_OK;
+}
+
 // src - a pointer to the data to send (16-bit aligned for 9-bit chars)
 // num_chars - number of characters to send (9-bit chars count for 2 bytes from src)
 // *errcode - returns 0 for success, MP_Exxx on error
@@ -414,48 +451,88 @@ STATIC size_t uart_tx_data(pyb_uart_obj_t *self, const void *src_in, size_t num_
         return 0;
     }
 
-    uint32_t timeout;
-    if (self->uart.Init.HwFlowCtl & UART_HWCONTROL_CTS) {
-        // CTS can hold off transmission for an arbitrarily long time. Apply
-        // the overall timeout rather than the character timeout.
-        timeout = self->timeout;
-    } else {
-        // The timeout specified here is for waiting for the TX data register to
-        // become empty (ie between chars), as well as for the final char to be
-        // completely transferred.  The default value for timeout_char is long
-        // enough for 1 char, but we need to double it to wait for the last char
-        // to be transferred to the data register, and then to be transmitted.
-        timeout = 2 * self->timeout_char;
-    }
-
     const uint8_t *src = (const uint8_t*)src_in;
     size_t num_tx = 0;
-    USART_TypeDef *uart = self->uart.Instance;
 
-    while (num_tx < num_chars) {
-        if (!uart_wait_flag_set(self, UART_FLAG_TXE, timeout)) {
-            *errcode = MP_ETIMEDOUT;
-            return num_tx;
+    if (num_chars == 1 || query_irq() == IRQ_STATE_DISABLED || self->tx_dma_descr == NULL) {
+		uint32_t timeout;
+		if (self->uart.Init.HwFlowCtl & UART_HWCONTROL_CTS) {
+			// CTS can hold off transmission for an arbitrarily long time. Apply
+			// the overall timeout rather than the character timeout.
+			timeout = self->timeout;
+		} else {
+			// The timeout specified here is for waiting for the TX data register to
+			// become empty (ie between chars), as well as for the final char to be
+			// completely transferred.  The default value for timeout_char is long
+			// enough for 1 char, but we need to double it to wait for the last char
+			// to be transferred to the data register, and then to be transmitted.
+			timeout = 2 * self->timeout_char;
+		}
+        while (num_tx < num_chars) {
+            if (!uart_wait_flag_set(self, UART_FLAG_TXE, timeout)) {
+                *errcode = MP_ETIMEDOUT;
+                return num_tx;
+            }
+            USART_TypeDef *uart = self->uart.Instance;
+            uint32_t data;
+            if (self->char_width == CHAR_WIDTH_9BIT) {
+                data = *((uint16_t*)src) & 0x1ff;
+                src += 2;
+            } else {
+                data = *src++;
+            }
+            #if defined(MCU_SERIES_F4)
+            uart->DR = data;
+            #else
+            uart->TDR = data;
+            #endif
+            ++num_tx;
         }
-        uint32_t data;
-        if (self->char_width == CHAR_WIDTH_9BIT) {
-            data = *((uint16_t*)src) & 0x1ff;
-            src += 2;
-        } else {
-            data = *src++;
+		// wait for the UART frame to complete
+		if (!uart_wait_flag_set(self, UART_FLAG_TC, timeout)) {
+			*errcode = MP_ETIMEDOUT;
+			return num_tx;
+		}
+    } else {
+        HAL_StatusTypeDef status;
+    	uint16_t byte_cnt = num_chars;
+    	if (tx_dma.Instance != NULL) {
+        	*errcode = MP_EBUSY;
+        	return 0;
+    	}
+    	dma_init(&tx_dma, self->tx_dma_descr, &self->uart);
+    	if (self->char_width == CHAR_WIDTH_9BIT) {
+    		byte_cnt *= 2;
+    		tx_dma.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    		tx_dma.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+            HAL_DMA_DeInit(&tx_dma);
+            HAL_DMA_Init(&tx_dma);
+    	}
+    	// Other half of __HAL_LINKDMA(data, xxx, *dma)
+    	self->uart.hdmatx = &tx_dma;
+        MP_HAL_CLEAN_DCACHE(src, byte_cnt);
+        self->tx_tick_start = mp_hal_ticks_us();
+        status = HAL_UART_Transmit_DMA(&self->uart, (uint8_t*)src, num_chars);
+        if (status == HAL_BUSY) {
+        	*errcode = MP_EBUSY;
+        	return 0;
         }
-        #if defined(MCU_SERIES_F4)
-        uart->DR = data;
-        #else
-        uart->TDR = data;
-        #endif
-        ++num_tx;
-    }
-
-    // wait for the UART frame to complete
-    if (!uart_wait_flag_set(self, UART_FLAG_TC, timeout)) {
-        *errcode = MP_ETIMEDOUT;
-        return num_tx;
+        if (status == HAL_OK) {
+            status = uart_wait_for_state(self, HAL_UART_STATE_READY, self->timeout);
+			if (status == HAL_TIMEOUT) {
+				uint32_t tx_tick_stop = mp_hal_ticks_us();
+				printf("TX non blocking %d us\r\n", (int)(tx_tick_stop-self->tx_tick_start));
+				*errcode = MP_EWOULDBLOCK;
+				return 0;
+			} else if (status == HAL_OK) {
+				uint32_t tx_tick_stop = mp_hal_ticks_us();
+				printf("TX time %d us\r\n", (int)(tx_tick_stop-self->tx_tick_start));
+			}
+        }
+		if (status != HAL_OK) {
+			mp_hal_raise(status);
+		}
+        num_tx = num_chars;
     }
 
     *errcode = 0;
@@ -499,6 +576,39 @@ void uart_irq_handler(mp_uint_t uart_id) {
                 __HAL_UART_DISABLE_IT(&self->uart, UART_IT_RXNE);
             }
         }
+    }
+
+    if (__HAL_UART_GET_FLAG(&self->uart, UART_FLAG_IDLE) != RESET) {
+        __HAL_UART_CLEAR_IDLEFLAG(&self->uart);
+        // execute callback if it's set
+        if (self->callback != mp_const_none) {
+            mp_sched_lock();
+            // When executing code within a handler we must lock the GC to prevent
+            // any memory allocations.  We must also catch any exceptions.
+            gc_lock();
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                mp_call_function_1(self->callback, self);
+                nlr_pop();
+            } else {
+                // Uncaught exception; disable the callback so it doesn't run again.
+                self->callback = mp_const_none;
+                printf("uncaught exception in UART interrupt handler\n");
+                mp_obj_print_exception(&mp_plat_print, (mp_obj_t)nlr.ret_val);
+            }
+            gc_unlock();
+            mp_sched_unlock();
+        }
+    }
+    if (__HAL_UART_GET_FLAG(&self->uart, UART_FLAG_TC) != RESET)
+    {
+    	HAL_UART_IRQHandler(&self->uart);
+    	if ( (HAL_UART_GetState(&self->uart) == HAL_UART_STATE_READY) && (tx_dma.Instance != NULL)) {
+			uint32_t tx_tick_stop = mp_hal_ticks_us();
+			printf("TX IRQ time %d us\r\n", (int)(tx_tick_stop-self->tx_tick_start));
+			dma_deinit(self->tx_dma_descr);
+			tx_dma.Instance = NULL;
+    	}
     }
 }
 
@@ -656,11 +766,13 @@ STATIC mp_obj_t pyb_uart_init_helper(pyb_uart_obj_t *self, size_t n_args, const 
         self->read_buf = NULL;
         HAL_NVIC_DisableIRQ(self->irqn);
         __HAL_UART_DISABLE_IT(&self->uart, UART_IT_RXNE);
+        __HAL_UART_DISABLE_IT(&self->uart, UART_IT_IDLE);
     } else {
         // read buffer using interrupts
         self->read_buf_len = args.read_buf_len.u_int + 1; // +1 to adjust for usable length of buffer
         self->read_buf = m_new(byte, self->read_buf_len << self->char_width);
         __HAL_UART_ENABLE_IT(&self->uart, UART_IT_RXNE);
+        __HAL_UART_ENABLE_IT(&self->uart, UART_IT_IDLE);
         HAL_NVIC_SetPriority(self->irqn, IRQ_PRI_UART, IRQ_SUBPRI_UART);
         HAL_NVIC_EnableIRQ(self->irqn);
     }
@@ -771,6 +883,7 @@ STATIC mp_obj_t pyb_uart_make_new(const mp_obj_type_t *type, size_t n_args, size
         self = m_new0(pyb_uart_obj_t, 1);
         self->base.type = &pyb_uart_type;
         self->uart_id = uart_id;
+        self->callback = mp_const_none;
         MP_STATE_PORT(pyb_uart_obj_all)[uart_id - 1] = self;
     } else {
         // reference existing UART object
@@ -915,6 +1028,23 @@ STATIC mp_obj_t pyb_uart_sendbreak(mp_obj_t self_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(pyb_uart_sendbreak_obj, pyb_uart_sendbreak);
 
+/// \method callback(fun)
+/// Set the function to be called when the uart received byte.
+/// `fun` is passed 1 argument, the timer object.
+/// If `fun` is `None` then the callback will be disabled.
+STATIC mp_obj_t pyb_uart_callback(mp_obj_t self_in, mp_obj_t callback) {
+    pyb_uart_obj_t *self = self_in;
+    if (callback == mp_const_none) {
+        self->callback = mp_const_none;
+    } else if (mp_obj_is_callable(callback)) {
+        self->callback = callback;
+    } else {
+        mp_raise_ValueError("callback must be None or a callable object");
+    }
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(pyb_uart_callback_obj, pyb_uart_callback);
+
 STATIC const mp_rom_map_elem_t pyb_uart_locals_dict_table[] = {
     // instance methods
 
@@ -934,6 +1064,9 @@ STATIC const mp_rom_map_elem_t pyb_uart_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_writechar), MP_ROM_PTR(&pyb_uart_writechar_obj) },
     { MP_ROM_QSTR(MP_QSTR_readchar), MP_ROM_PTR(&pyb_uart_readchar_obj) },
     { MP_ROM_QSTR(MP_QSTR_sendbreak), MP_ROM_PTR(&pyb_uart_sendbreak_obj) },
+
+    // \method callback(fun)
+    { MP_ROM_QSTR(MP_QSTR_callback), MP_ROM_PTR(&pyb_uart_callback_obj) },
 
     // class constants
     { MP_ROM_QSTR(MP_QSTR_RTS), MP_ROM_INT(UART_HWCONTROL_RTS) },
@@ -1013,16 +1146,18 @@ STATIC mp_uint_t pyb_uart_write(mp_obj_t self_in, const void *buf_in, mp_uint_t 
 
 STATIC mp_uint_t pyb_uart_ioctl(mp_obj_t self_in, mp_uint_t request, mp_uint_t arg, int *errcode) {
     pyb_uart_obj_t *self = self_in;
-    mp_uint_t ret;
+    mp_uint_t ret = 0;
     if (request == MP_STREAM_POLL) {
         mp_uint_t flags = arg;
-        ret = 0;
         if ((flags & MP_STREAM_POLL_RD) && uart_rx_any(self)) {
             ret |= MP_STREAM_POLL_RD;
         }
         if ((flags & MP_STREAM_POLL_WR) && __HAL_UART_GET_FLAG(&self->uart, UART_FLAG_TXE)) {
             ret |= MP_STREAM_POLL_WR;
         }
+    } else if (request == MP_STREAM_TIMEOUT) {
+        mp_uint_t timeout = arg;
+        self->timeout = timeout;
     } else {
         *errcode = MP_EINVAL;
         ret = MP_STREAM_ERROR;

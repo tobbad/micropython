@@ -140,6 +140,27 @@ static const DMA_InitTypeDef dma_init_struct_dac = {
     #endif
 };
 #endif
+// Default parameters to dma_init() for UART RX/TX
+static const DMA_InitTypeDef dma_init_struct_uart = {
+    #if defined(MCU_SERIES_F4) || defined(MCU_SERIES_F7)
+    .Channel             = 0,
+    #elif defined(MCU_SERIES_L4)
+    .Request             = 0,
+    #endif
+    .Direction           = 0,
+    .PeriphInc           = DMA_PINC_DISABLE,
+    .MemInc              = DMA_MINC_ENABLE,
+    .PeriphDataAlignment = DMA_PDATAALIGN_BYTE,
+    .MemDataAlignment    = DMA_MDATAALIGN_BYTE,
+    .Mode                = DMA_NORMAL,
+    .Priority            = DMA_PRIORITY_HIGH,
+    #if defined(MCU_SERIES_F4) || defined(MCU_SERIES_F7)
+    .FIFOMode            = DMA_FIFOMODE_DISABLE,
+    .FIFOThreshold       = DMA_FIFO_THRESHOLD_HALFFULL,
+    .MemBurst            = DMA_MBURST_SINGLE,
+    .PeriphBurst         = DMA_PBURST_SINGLE,
+    #endif
+};
 
 #if defined(MCU_SERIES_F4) || defined(MCU_SERIES_F7)
 
@@ -172,8 +193,12 @@ const dma_descr_t dma_I2C_3_TX = { DMA1_Stream4, DMA_CHANNEL_3, DMA_MEMORY_TO_PE
 #if defined(MCU_SERIES_F7)
 const dma_descr_t dma_I2C_4_TX = { DMA1_Stream5, DMA_CHANNEL_2, DMA_MEMORY_TO_PERIPH, dma_id_5,   &dma_init_struct_spi_i2c };
 #endif
+const dma_descr_t dma_UART_2_RX= { DMA1_Stream5, DMA_CHANNEL_4, DMA_PERIPH_TO_MEMORY, dma_id_5,   &dma_init_struct_uart };
 #if defined(MICROPY_HW_ENABLE_DAC) && MICROPY_HW_ENABLE_DAC
 const dma_descr_t dma_DAC_1_TX = { DMA1_Stream5, DMA_CHANNEL_7, DMA_MEMORY_TO_PERIPH, dma_id_5,   &dma_init_struct_dac };
+#endif
+const dma_descr_t dma_UART_2_TX= { DMA1_Stream6, DMA_CHANNEL_4, DMA_MEMORY_TO_PERIPH, dma_id_6,   &dma_init_struct_uart };
+#if defined(MICROPY_HW_ENABLE_DAC) && MICROPY_HW_ENABLE_DAC
 const dma_descr_t dma_DAC_2_TX = { DMA1_Stream6, DMA_CHANNEL_7, DMA_MEMORY_TO_PERIPH, dma_id_6,   &dma_init_struct_dac };
 #endif
 const dma_descr_t dma_SPI_3_TX = { DMA1_Stream7, DMA_CHANNEL_0, DMA_MEMORY_TO_PERIPH, dma_id_7,   &dma_init_struct_spi_i2c };
@@ -189,6 +214,7 @@ const dma_descr_t dma_I2C_1_TX = { DMA1_Stream6, DMA_CHANNEL_1, DMA_MEMORY_TO_PE
 const dma_descr_t dma_SDMMC_2_RX= { DMA2_Stream0, DMA_CHANNEL_11, DMA_PERIPH_TO_MEMORY, dma_id_8,  &dma_init_struct_sdio };
 #endif
 const dma_descr_t dma_SPI_1_RX = { DMA2_Stream2, DMA_CHANNEL_3, DMA_PERIPH_TO_MEMORY, dma_id_10,  &dma_init_struct_spi_i2c };
+const dma_descr_t dma_UART_1_RX= { DMA2_Stream2, DMA_CHANNEL_4, DMA_PERIPH_TO_MEMORY, dma_id_10,  &dma_init_struct_uart };
 const dma_descr_t dma_SPI_5_RX = { DMA2_Stream3, DMA_CHANNEL_2, DMA_PERIPH_TO_MEMORY, dma_id_11,  &dma_init_struct_spi_i2c };
 #if defined(MICROPY_HW_HAS_SDCARD) && MICROPY_HW_HAS_SDCARD
 const dma_descr_t dma_SDIO_0_RX= { DMA2_Stream3, DMA_CHANNEL_4, DMA_PERIPH_TO_MEMORY, dma_id_11,  &dma_init_struct_sdio };
@@ -205,6 +231,7 @@ const dma_descr_t dma_SPI_6_RX = { DMA2_Stream6, DMA_CHANNEL_1, DMA_PERIPH_TO_ME
 #if defined(MICROPY_HW_HAS_SDCARD) && MICROPY_HW_HAS_SDCARD
 const dma_descr_t dma_SDIO_0_TX= { DMA2_Stream6, DMA_CHANNEL_4, DMA_MEMORY_TO_PERIPH, dma_id_14,  &dma_init_struct_sdio };
 #endif
+const dma_descr_t dma_UART_1_TX= { DMA2_Stream7, DMA_CHANNEL_4, DMA_MEMORY_TO_PERIPH, dma_id_15,  &dma_init_struct_uart };
 /* not preferred streams
 const dma_descr_t dma_SPI_1_TX = { DMA2_Stream3, DMA_CHANNEL_3, DMA_MEMORY_TO_PERIPH, dma_id_11,  &dma_init_struct_spi_i2c };
 const dma_descr_t dma_SPI_1_RX = { DMA2_Stream0, DMA_CHANNEL_3, DMA_PERIPH_TO_MEMORY, dma_id_8,   &dma_init_struct_spi_i2c };
@@ -259,14 +286,18 @@ const dma_descr_t dma_I2C_3_RX = { DMA1_Channel3, DMA_REQUEST_3, DMA_PERIPH_TO_M
 const dma_descr_t dma_DAC_1_TX = { DMA1_Channel3, DMA_REQUEST_6, DMA_MEMORY_TO_PERIPH, dma_id_2,   &dma_init_struct_dac };
 #endif
 const dma_descr_t dma_SPI_2_RX = { DMA1_Channel4, DMA_REQUEST_1, DMA_PERIPH_TO_MEMORY, dma_id_3,   &dma_init_struct_spi_i2c };
+const dma_descr_t dma_UART_1_TX ={ DMA1_Channel4, DMA_REQUEST_2, DMA_MEMORY_TO_PERIPH, dma_id_3,   &dma_init_struct_uart };
 const dma_descr_t dma_I2C_2_TX = { DMA1_Channel4, DMA_REQUEST_3, DMA_MEMORY_TO_PERIPH, dma_id_3,   &dma_init_struct_spi_i2c };
 #if MICROPY_HW_ENABLE_DAC
 const dma_descr_t dma_DAC_2_TX = { DMA1_Channel4, DMA_REQUEST_5, DMA_MEMORY_TO_PERIPH, dma_id_3,   &dma_init_struct_dac };
 #endif
 const dma_descr_t dma_SPI_2_TX = { DMA1_Channel5, DMA_REQUEST_1, DMA_MEMORY_TO_PERIPH, dma_id_4,   &dma_init_struct_spi_i2c };
+const dma_descr_t dma_UART_1_RX ={ DMA1_Channel5, DMA_REQUEST_2, DMA_PERIPH_TO_MEMORY, dma_id_4,   &dma_init_struct_uart };
 const dma_descr_t dma_I2C_2_RX = { DMA1_Channel5, DMA_REQUEST_3, DMA_PERIPH_TO_MEMORY, dma_id_4,   &dma_init_struct_spi_i2c };
+const dma_descr_t dma_UART_2_RX ={ DMA1_Channel6, DMA_REQUEST_2, DMA_PERIPH_TO_MEMORY, dma_id_5,   &dma_init_struct_uart };
 const dma_descr_t dma_I2C_1_TX = { DMA1_Channel6, DMA_REQUEST_3, DMA_MEMORY_TO_PERIPH, dma_id_5,   &dma_init_struct_spi_i2c };
 const dma_descr_t dma_I2C_1_RX = { DMA1_Channel7, DMA_REQUEST_3, DMA_PERIPH_TO_MEMORY, dma_id_6,   &dma_init_struct_spi_i2c };
+const dma_descr_t dma_UART_2_TX ={ DMA1_Channel7, DMA_REQUEST_2, DMA_MEMORY_TO_PERIPH, dma_id_6,   &dma_init_struct_uart };
 
 // DMA2 streams
 const dma_descr_t dma_SPI_3_RX = { DMA2_Channel1, DMA_REQUEST_3, DMA_PERIPH_TO_MEMORY, dma_id_7,   &dma_init_struct_spi_i2c };
@@ -411,8 +442,20 @@ void dma_init_handle(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, void 
     dma->Init.Direction = dma_descr->transfer_direction;
     #if defined(MCU_SERIES_L4)
     dma->Init.Request = dma_descr->sub_instance;
+    // Factor 4 for Matching channel bit location with
+    // CSELR, IFCR, ISR .. register.
+    // See as well HAL_DMA_init()
+    dma->ChannelIndex = ((dma_descr->id)%NSTREAMS_PER_CONTROLLER)<<2;
+    if (dma_descr->id < NSTREAMS_PER_CONTROLLER) {
+    	dma->DmaBaseAddress = DMA1;
+    } else {
+    	dma->DmaBaseAddress = DMA2;
+    }
     #else
     dma->Init.Channel = dma_descr->sub_instance;
+    // calculate DMA base address and bitshift to be used in IRQ handler
+    extern uint32_t DMA_CalcBaseAndBitshift(DMA_HandleTypeDef *hdma);
+    DMA_CalcBaseAndBitshift(dma);
     #endif
     // half of __HAL_LINKDMA(data, xxx, *dma)
     // caller must implement other half by doing: data->xxx = dma
@@ -437,23 +480,19 @@ void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, void *data){
         // if this stream was previously configured for this channel/request then we
         // can skip most of the initialisation
         uint8_t sub_inst = DMA_SUB_INSTANCE_AS_UINT8(dma_descr->sub_instance);
-        if (dma_last_sub_instance[dma_id] != sub_inst) {
+        /* if (dma_last_sub_instance[dma_id] != sub_inst)*/ {
             dma_last_sub_instance[dma_id] = sub_inst;
 
             // reset and configure DMA peripheral
             // (dma->State is set to HAL_DMA_STATE_RESET by memset above)
-            HAL_DMA_DeInit(dma);
+            //HAL_DMA_DeInit(dma);
+            dma_enable_clock(dma_id);
             HAL_DMA_Init(dma);
             HAL_NVIC_SetPriority(dma_irqn[dma_id], IRQ_PRI_DMA, IRQ_SUBPRI_DMA);
-        } else {
+        } /*else {
             // only necessary initialization
             dma->State = HAL_DMA_STATE_READY;
-#if defined(MCU_SERIES_F4) || defined(MCU_SERIES_F7)
-            // calculate DMA base address and bitshift to be used in IRQ handler
-            extern uint32_t DMA_CalcBaseAndBitshift(DMA_HandleTypeDef *hdma);
-            DMA_CalcBaseAndBitshift(dma);
-#endif
-        }
+        }*/
 
         HAL_NVIC_EnableIRQ(dma_irqn[dma_id]);
     }
@@ -461,9 +500,9 @@ void dma_init(DMA_HandleTypeDef *dma, const dma_descr_t *dma_descr, void *data){
 
 void dma_deinit(const dma_descr_t *dma_descr) {
     if (dma_descr != NULL) {
+    	HAL_DMA_DeInit(dma_handle[dma_descr->id]);
         HAL_NVIC_DisableIRQ(dma_irqn[dma_descr->id]);
         dma_handle[dma_descr->id] = NULL;
-
         dma_disable_clock(dma_descr->id);
     }
 }

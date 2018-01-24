@@ -272,6 +272,7 @@ SRC_HAL = $(addprefix $(HAL_DIR)/Src/stm32$(MCU_SERIES)xx_,\
 	hal_tim.c \
 	hal_tim_ex.c \
 	hal_uart.c \
+	hal_uart_ex.c \
 	ll_sdmmc.c \
 	ll_usb.c \
 	)
