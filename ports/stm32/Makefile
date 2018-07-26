@@ -132,6 +132,7 @@ SRC_LIBM = $(addprefix lib/libm_dbl/,\
 	atan2.c \
 	atanh.c \
 	ceil.c \
+	copysign.c \
 	cos.c \
 	cosh.c \
 	erf.c \
